@@ -204,10 +204,11 @@ Fenêtre=1
 \begin{itemize}
     \item Gestion des ACKs cumulatifs : S'assurer que la réception d'un ACK libère correctement tous les paquets précédents du "frigo".
     \item Synchronisation du Timer : Éviter les redondances de timers lors de l'envoi rapide de plusieurs paquets en mode Pipelining.
+    \item Prise en main du language python afin de changer le comportement de l'objet Host.py.
 \end{itemize}
 
 \subsection{État final}
-L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent en Stop-and-Wait, tandis que les modes 4 et 5 exploitent le Pipelining pour optimiser l'utilisation de la bande passante.
+L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent en Stop-and-Wait, tandis que les modes 4 et 5 exploitent le Pipelining pour optimiser l'utilisation de la bande passante. Elle contient aussi des nouveaux logs pour rendre le comportement de l'application plus clair.
 
 \section{Simulations}
 \subsection{Analyse des résultats et réponses aux questions de l'énoncé}
@@ -227,14 +228,14 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
 
 \textit{1. Débit Moyen Effectif :}
 \begin{itemize}
-    \item Données : 10 paquets $\times$ 10 octets = 800 bits
-    \item Temps : 0.000000 à 0.002840 s = 0.002840 s
+    \item Données : 10 paquets $\times$ 10 octets $\times$ 8bits/octects = 800 bits
+    \item Temps : 0.000000 à 0.002840 s (réception du dernier ACK pour SN = 10) = 0.002840 s
     \item \textbf{Débit} : $\frac{800}{0.002840} \approx 282$ kbps
 \end{itemize}
 
-\textit{2. Délai Moyen :}
+\textit{2. Délai Moyen :}  
 \begin{itemize}
-    \item Moyen $\approx 0.000284$ s (très rapide en l'absence de perte)
+    \item Total des délais / 10 $\approx 0.000284$ s (très rapide en l'absence de perte)
 \end{itemize}
 
 \textit{3. Retransmission :}
@@ -242,7 +243,7 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
     \item Taux : 0\% (aucune retransmission, pas de timer)
 \end{itemize}
 
-\paragraph{Débit effectif :} 282 kbps (sans perte) | Bloqué indéfiniment (avec perte ACK)
+\paragraph{Débit effectif :} 282 kbps (sans perte) | Bloqué indéfiniment (avec perte ACK) | il est nettement inférieur au débit du lien le plus lent (500 kbps). Cette sous-utilisation du canal est caractéristique du Stop-and-Wait. L'émetteur passe la majeure partie de son temps en attente du feedback du récepteur plutôt qu'à transmettre des données utiles.
 
 \subsubsection{Mode 3 : Stop-and-Wait avec Retransmission}
 \textit{Logs : logs\_mode3.md}
@@ -257,16 +258,17 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
 
 \paragraph{Calculs de Performance :}
 
+
 \textit{1. Débit Moyen Effectif :}
 \begin{itemize}
-    \item Données : 10 paquets $\times$ 10 octets = 800 bits
+    \item Données : 10 paquets $\times$ 10 octets $\times$ 8bits/octects = 800 bits
     \item Temps : 0.000000 à 0.501972 s = 0.501972 s
     \item \textbf{Débit} : $\frac{800}{0.501972} \approx 1.6$ kbps (\textit{fortement réduit par timeout})
 \end{itemize}
 
 \textit{2. Délai Moyen :}
 \begin{itemize}
-    \item Moyen : $\approx 0.050$ s (dominé par le délai de SN=6 : $0.501972 - 0.001021 = 0.501$ s)
+    \item Total des délais / 10 : $\approx 0.050$ s (dominé par le délai de SN=6 : $0.501972 - 0.001021 = 0.501$ s)
 \end{itemize}
 
 \textit{3. Retransmission :}
@@ -291,14 +293,14 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
 
 \textit{1. Débit Moyen Effectif :}
 \begin{itemize}
-    \item Données : 10 paquets $\times$ 10 octets = 800 bits
-    \item Temps : 0.000000 à 0.001724 s = 0.001724 s
+    \item Données : 10 paquets $\times$ 10 octets $\times$ 8bits/octects = 800 bits
+    \item Temps : 0.000000 à 0.001724 s (réception du dernier ACK pour SN = 10) = 0.001724 s
     \item \textbf{Débit} : $\frac{800}{0.001724} \approx 464$ kbps (2.8x plus rapide que Mode 3)
 \end{itemize}
 
 \textit{2. Délai Moyen :}
 \begin{itemize}
-    \item Moyen : $\approx 0.0012$ s (pipelining réduit les délais)
+    \item Total des délais / Nombre de SN : $\approx 0.0012$ s (pipelining réduit les délais)
 \end{itemize}
 
 \textit{3. Retransmission :}
@@ -379,5 +381,7 @@ TCP VEGAS propose une détection proactive de congestion basée sur le RTT (Roun
 \end{itemize}
 
 \subsection{Conclusion générale}
-Ce projet démontre l'importance de l'adaptation dynamique. Le Mode 5 (fenêtre dynamique) surpasse le Mode 4 (fenêtre fixe) en s'ajustant automatiquement aux capacités réseau. L'intégration d'algorithmes proactifs comme VEGAS (détection RTT) améliorerait encore la résilience dans les environnements chaotiques. L'évolution vers le contrôle de congestion TCP représente la voie naturelle pour optimiser les protocoles de transmission fiable.
+Cette application en Python met en perspective l'évolution  de l'échange des paquets dans les communications internets, notamment dans le mode TCP et UDP.
+\newline
+Nous voyons un envoi  limité qui ne prends pas en compte les pertes de pacquets et les pertes d'acquittement ( voir mode 1 et page 15 a 20 du chapitre 3 ) , ensuite la creation des ACK pour rendre les échanges fiables ( le mode 2 et les pages 31 a 40 du chapitre 3 ) , une amélioration avec un timer dans le mode 3 ( les pages 40 a 52 du chapitre 3 ) et la création du pipeline qui permet l'envoi en paralléle mais qui crée une congestion ; cela suit la théorie selon les pages 54 a 70 et finalement les pages 143 a 157 du chapitre 3 pour la gestion de la congestion d'un pipeline. 
 \end{document}
