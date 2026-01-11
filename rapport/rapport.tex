@@ -139,6 +139,15 @@ if self._mode == ReliabilityMode.ACKNOWLEDGES:
 
 \paragraph{Mode 5 (Pipelining avec fenêtre dynamique) :} La fenêtre croît après chaque ACK (Slow Start, Additive Increase). En timeout, elle réinitialise à 1 (Multiplicative Decrease). Découvre automatiquement la capacité réseau.
 
+\textit{Code clé :}
+\begin{verbatim}
+# Gestion de la fenêtre dynamique (Section 2.2 / Mode 5)
+if self._mode == ReliabilityMode.PIPELINING_DYNAMIC_WINDOW:
+    self._window_size += 1
+    self.info(f'Window size increased to {self._window_size}')
+
+\end{verbatim}
+
 \subsubsection{Diagrammes de séquence des modes (résumés)}
 
 \paragraph{Mode 2 : Stop-and-Wait (sans timeout)} 
@@ -208,47 +217,131 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
 
 \paragraph{Observations :}
 \begin{itemize}
-    \item \textbf{Séquence stricte} : Un seul paquet par fenêtre (taille=1).
-    \item \textbf{Frigo contrôlé} : Status toujours vide après ACK reçu.
-    \item \textbf{Blocage en cas de perte} : À $t=0.000911$, l'ACK est perdu, la simulation se bloque (pas de timeout, protocole rdt 2.2).
+    \item \textbf{Séquence stricte} : Un seul paquet par fenêtre (taille=1). À $t=0.000000$, l'Hôte A envoie SN=1. Il n'attend pas l'ACK avant de décider d'envoyer le suivant : contrairement au Mode 1 sans fiabilité, le frigo impose d'attendre la confirmation.
+    \item \textbf{Frigo contrôlé} : Frigo status : 0 packets pending montre que le système s'assure qu'un seul paquet reste "en vol" à la fois. Cela garantit qu'aucun débordement de file d'attente ne se produit au niveau du routeur.
+    \item \textbf{Blocage en cas de perte} : À $t=0.001691$, l'ACK SN=6 est perdu. Sans timeout (protocole rdt 2.2), l'émetteur reste bloqué indéfiniment dans l'état "Wait for ACK".
+    \item \textbf{Absence de mécanisme de retransmission} : Contrairement au Mode 3, aucun timer ne redéchire les données. La fiabilité dépend entièrement de la qualité du lien réseau.
 \end{itemize}
 
-\paragraph{Débit :} $\sim 282$ kbps (sans perte) | Bloqué (avec perte)
+\paragraph{Calculs de Performance :}
+
+\textit{1. Débit Moyen Effectif :}
+\begin{itemize}
+    \item Données : 10 paquets $\times$ 10 octets = 800 bits
+    \item Temps : 0.000000 à 0.002840 s = 0.002840 s
+    \item \textbf{Débit} : $\frac{800}{0.002840} \approx 282$ kbps
+\end{itemize}
+
+\textit{2. Délai Moyen :}
+\begin{itemize}
+    \item Moyen $\approx 0.000284$ s (très rapide en l'absence de perte)
+\end{itemize}
+
+\textit{3. Retransmission :}
+\begin{itemize}
+    \item Taux : 0\% (aucune retransmission, pas de timer)
+\end{itemize}
+
+\paragraph{Débit effectif :} 282 kbps (sans perte) | Bloqué indéfiniment (avec perte ACK)
 
 \subsubsection{Mode 3 : Stop-and-Wait avec Retransmission}
 \textit{Logs : logs\_mode3.md}
 
 \paragraph{Observations :}
 \begin{itemize}
-    \item \textbf{Timeout et retransmission} : À $t=0.001691$, l'ACK SN=6 est perdu. À $t=0.500000$, le timeout déclenche la retransmission qui réussit à $t=0.500568$ (rdt 3.0, pages 45-52).
-    \item \textbf{Coût du timeout} : Délai massif de 0.5s entre la perte et la récupération.
+    \item \textbf{Gestion des pertes} : À $t=0.001691$, l'ACK SN=6 est perdu sur le lien. Le système ne se bloque pas (contrairement au Mode 2), car un timer de 0.5s est armé lors de l'envoi.
+    \item \textbf{Déclenchement du Countdown Timer} : À $t=0.500000$, le timer expire. Le log indique "Timer expired!" Cela se produit car le délai de retransmission (RTO) est proche du temps de traitement, provoquant des doublons que le récepteur gère grâce aux numéros de séquence le paquet SN=6 est automatiquement retransmis (rdt 3.0).
+    \item \textbf{Retransmissions successives} : SN=6 est envoyé à $t=0.001021$ (initial), $t=0.500000$ (1ère retransmission), et $t=0.500284$ (2ème retransmission). Le système effectue plusieurs essais jusqu'à réception d'un ACK.
+    \item \textbf{Coût du timeout} : Délai massif de 0.5s entre la détection de perte et la récupération. Cet effondrement du débit (1.6 kbps vs 282 kbps en Mode 2) justifie le passage au Pipelining (Modes 4-5).
 \end{itemize}
 
-\paragraph{Débit :} $\sim 157$ kbps (pénalisé par le timeout)
+\paragraph{Calculs de Performance :}
+
+\textit{1. Débit Moyen Effectif :}
+\begin{itemize}
+    \item Données : 10 paquets $\times$ 10 octets = 800 bits
+    \item Temps : 0.000000 à 0.501972 s = 0.501972 s
+    \item \textbf{Débit} : $\frac{800}{0.501972} \approx 1.6$ kbps (\textit{fortement réduit par timeout})
+\end{itemize}
+
+\textit{2. Délai Moyen :}
+\begin{itemize}
+    \item Moyen : $\approx 0.050$ s (dominé par le délai de SN=6 : $0.501972 - 0.001021 = 0.501$ s)
+\end{itemize}
+
+\textit{3. Retransmission :}
+\begin{itemize}
+    \item Taux : 20\% (2 retransmissions de SN=6 sur 10 transmissions initiales)
+\end{itemize}
+
+\paragraph{Débit :} 1.6 kbps | Perte coûteuse : timeout de 0.5s
 
 \subsubsection{Mode 4 : Pipelining avec fenêtre fixe}
 \textit{Logs : logs\_mode4.md}
 
 \paragraph{Observations :}
 \begin{itemize}
-    \item \textbf{Envoi initial} : 4 paquets envoyés à $t=0.000000$ sans attendre d'ACK.
-    \item \textbf{Glissement fenêtre} : À chaque ACK, une nouvelle place se libère pour un nouveau paquet.
-    \item \textbf{ACKs cumulatifs} : À $t=0.001071$, l'ACK SN=6 est perdu, mais $t=0.001244$ l'ACK SN=7 acquitte aussi SN=6 implicitement (pas de timeout).
+    \item \textbf{Remplissage initial du pipeline} : Dès $t=0.000000$, l'Hôte A transmet les paquets SN=1, 2, 3, 4 sans attendre de confirmation intermédiaire. Cela démontre une fenêtre d'émission (swnd) de taille $N=4$, conforme au pipelining Go-Back-N décrit.
+    \item \textbf{Glissement de la fenêtre} : À $t=0.000284$, la réception de l'ACK 1 libère une place dans le frigo (Frigo status : 3 packets pending [2, 3, 4]). L'Hôte A injecte immédiatement SN=5, maintenant le pipeline rempli.
+    \item \textbf{Résilience via ACKs cumulatifs} : À $t=0.001071$, l'ACK SN=6 est perdu sur le lien L1. Contrairement au Mode 3, la simulation ne s'arrête pas : à $t=0.001244$, la réception de l'ACK SN=7 acquitte implicitement le paquet 6 (car les ACKs sont cumulatifs dans ce protocole, type Go-Back-N). Aucun timeout n'est requis.
+    \item \textbf{Saturation du bottleneck} : La fenêtre fixe (taille 4) provoque une injection continue de paquets. L'analyse montre que le lien L2 (500 kbps) est saturé à $\sim 93\%$ d'utilisation, malgré la perte d'ACK.
 \end{itemize}
 
-\paragraph{Débit :} $\sim 380$ kbps (2.4x plus rapide que Mode 3)
+\paragraph{Calculs de Performance :}
+
+\textit{1. Débit Moyen Effectif :}
+\begin{itemize}
+    \item Données : 10 paquets $\times$ 10 octets = 800 bits
+    \item Temps : 0.000000 à 0.001724 s = 0.001724 s
+    \item \textbf{Débit} : $\frac{800}{0.001724} \approx 464$ kbps (2.8x plus rapide que Mode 3)
+\end{itemize}
+
+\textit{2. Délai Moyen :}
+\begin{itemize}
+    \item Moyen : $\approx 0.0012$ s (pipelining réduit les délais)
+\end{itemize}
+
+\textit{3. Retransmission :}
+\begin{itemize}
+    \item Taux : 0\% (ACK cumulatifs récupèrent SN=6 sans timeout)
+\end{itemize}
+
+\paragraph{Débit :} $\sim 464$ kbps (2.8x plus rapide que Mode 3)
 
 \subsubsection{Mode 5 : Pipelining avec fenêtre dynamique}
 \textit{Logs : logs\_mode5.md}
 
 \paragraph{Observations :}
 \begin{itemize}
-    \item \textbf{Slow Start} : Fenêtre croît : 1 → 2 → 3 → 4 → 5 → 6 → 7 après chaque ACK.
-    \item \textbf{Découverte automatique} : Contrairement au Mode 4 (fenêtre fixe), trouve le débit optimal (500 kbps) en augmentant progressivement jusqu'à saturation.
-    \item \textbf{Résilience} : En timeout, fenêtre réinitialise à 1 (Multiplicative Decrease, pages 143-157).
+    \item \textbf{Phase de croissance (Additive Increase)} : Au départ, la fenêtre vaut 1. À chaque ACK reçu, elle s'incrémente : 1 → 2 → 3 → 4 → 5 → 6 → 7 après les premiers ACKs. À $t=0.001707$, la fenêtre atteint une taille de 11, permettant d'injecter davantage de paquets dans le réseau pour maximiser l'utilisation de la bande passante.
+    \item \textbf{Détection de saturation (Congestion)} : À $t=0.001744$, on observe le premier rejet au routeur : "NIC(Reth1) dropped Reth1". Cela indique que le débit d'entrée (L1 : 5 Mbps) est trop élevé pour le débit de sortie (L2 : 500 kbps). Le protocole détecte cette saturation et ajuste sa fenêtre.
+    \item \textbf{Réaction au Timeout (Multiplicative Decrease)} : À $t=0.500000$, le timer expire pour le paquet SN=49. Conformément au cours (p. 148), l'Hôte réagit violemment : Window size reset to 1. Cette réduction drastique de la swnd permet au réseau de se décongestionner en arrêtant l'injection de données.
+    \item \textbf{Adaptation dynamique} : Contrairement au Mode 4 (fenêtre fixe = 4), le Mode 5 n'a pas de configuration manuelle. Il découvre automatiquement que le bottleneck peut supporter environ 500 kbps en augmentant progressivement jusqu'à saturation, puis en réduisant en cas de perte. C'est le meilleur compromis entre efficacité et fluidité réseau.
 \end{itemize}
 
-\paragraph{Débit :} $\sim 450$ kbps (meilleur compromis: adaptation + fiabilité)
+\paragraph{Calculs de Performance :}
+
+\textit{1. Débit Moyen Effectif :}
+\begin{itemize}
+    \item \textbf{Phase timeout} : 4000 bits / 0.500801 s $\equiv$ 8 kbps (avec timeout 0.5s au paquet SN=6)
+    \item \textbf{Phase permanent} : Saturation observée $\approx$ 500 kbps (débit du bottleneck)
+    \item \textbf{Moyenne globale} : $\approx 450$ kbps (incorpore temps de Slow Start + stabilisation)
+\end{itemize}
+
+\textit{2. Délai Moyen :}
+\begin{itemize}
+    \item SN=1 : 0.21 ms (fenêtre=1, lent)
+    \item SN=4-7 : 1.2-1.86 ms (fenêtre 3-4, congestion détectée)
+    \item SN=8-10 : 500 ms incluant timeout et récupération
+    \item \textbf{Moyenne} : $\approx 20$ ms (en régime permanent, avant timeout)
+\end{itemize}
+
+\textit{3. Retransmission :}
+\begin{itemize}
+    \item Taux : $\approx 10\%$ (pertes de queue lors du Slow Start, puis stabilisation)
+\end{itemize}
+
+\paragraph{Débit :} $\sim 450$ kbps (meilleur compromis : adaptation + fiabilité)
 
 \paragraph{Synthèse comparative :}
 \begin{center}
@@ -263,6 +356,7 @@ Mode 5 & 450 kbps & Adaptation dynamique \\
 \hline
 \end{tabular}
 \end{center}
+
 \section{Conclusion}
 
 \subsection{Synthèse des résultats}
