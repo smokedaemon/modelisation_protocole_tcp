@@ -220,7 +220,7 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
     \item \textbf{Séquence stricte} : Un seul paquet par fenêtre (taille=1). À $t=0.000000$, l'Hôte A envoie SN=1. Il n'attend pas l'ACK avant de décider d'envoyer le suivant : contrairement au Mode 1 sans fiabilité, le frigo impose d'attendre la confirmation.
     \item \textbf{Frigo contrôlé} : Frigo status : 0 packets pending montre que le système s'assure qu'un seul paquet reste "en vol" à la fois. Cela garantit qu'aucun débordement de file d'attente ne se produit au niveau du routeur.
     \item \textbf{Blocage en cas de perte} : À $t=0.001691$, l'ACK SN=6 est perdu. Sans timeout (protocole rdt 2.2), l'émetteur reste bloqué indéfiniment dans l'état "Wait for ACK".
-    \item \textbf{Absence de mécanisme de retransmission} : Contrairement au Mode 3, aucun timer ne redéchire les données. La fiabilité dépend entièrement de la qualité du lien réseau.
+    \item \textbf{Absence de mécanisme de retransmission} : Ben que ce mode soit plus ordonné, il reste vulnérable aux pertes de paquets sur le lien. Si le paquet SN=1 ou son ACK était perdu, l'émetteur resterait bloqué indéfiniment dans l'état "Wait for ACK", car le mécanisme de Timer n'est introduit qu'avec le rdt 3.0
 \end{itemize}
 
 \paragraph{Calculs de Performance :}
