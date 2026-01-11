@@ -124,57 +124,73 @@ else:
     self._buffer.append(pkt)    # Buffer plein, attendre
 \end{verbatim}
 
-\paragraph{Modes 2 \& 3 (Stop-and-Wait) :} Les deux modes utilisent une fenêtre fixe de taille 1. L'émetteur envoie un paquet et doit attendre l'ACK avant de poursuivre. La différence fondamentale réside dans le timer :
+\paragraph{Mode 2 (Stop-and-Wait avec ACKs) :} Protocole rdt 2.2 sans timeout. Fenêtre=1, l'émetteur attend l'ACK avant d'envoyer le suivant.
 
-\subparagraph{Mode 2 (ACK simple) :} Pas de timer, le code retourne sans action :
+\textit{Code clé :}
 \begin{verbatim}
-def _start_timer(self):
-    if self._mode == ReliabilityMode.ACKNOWLEDGES:
-        return  # En mode 2, pas de timer
-    # ... suite du code
-\end{verbatim}
-Si un paquet est perdu, la simulation attend indéfiniment l'ACK.
-
-\subparagraph{Mode 3 (Retransmission) :} Le timer est armé lors de chaque envoi. À l'expiration, la méthode \_on\_timeout() retransmet :
-\begin{verbatim}
-def _on_timeout(self):
-    if self._unacked_packets:
-        oldest_pkt = self._unacked_packets[0]
-        self.info(f'Timer expired!')
-        self._nic.send(oldest_pkt)  # Retransmettre
-        self._timer_pending = False
-        self._start_timer()  # Réarmer le timer
+if self._mode == ReliabilityMode.ACKNOWLEDGES:
+    return  # Pas de timer en mode 2
 \end{verbatim}
 
-\paragraph{Modes 4 \& 5 (Pipelining) :} L'émetteur envoie plusieurs paquets dans une fenêtre de transmission avant d'attendre les ACKs.
+\textit{Impact logs :} Frigo vide, mais blocage en cas de perte d'ACK (pas de retransmission).
 
-\subparagraph{Mode 4 (Fenêtre fixe) :} La fenêtre a une taille pré-définie et constante (ex. 4 paquets). Si la fenêtre est pleine, les nouveaux paquets sont stockés dans le buffer.
+\paragraph{Mode 3 (Stop-and-Wait avec Retransmission) :} Ajoute le timer (rdt 3.0). À l'expiration (0.5s), retransmet le paquet le plus ancien.
 
-\subparagraph{Mode 5 (Fenêtre dynamique) :} La fenêtre débute à 1 et augmente d'un paquet à chaque ACK reçu, mimant le comportement TCP. En cas de timeout, elle réinitialise à 1 :
+\paragraph{Mode 4 (Pipelining avec fenêtre fixe) :} Envoie plusieurs paquets (fenêtre=4) sans attendre les ACKs. Utilise les ACKs cumulatifs pour acquitter plusieurs paquets en un seul message.
+
+\paragraph{Mode 5 (Pipelining avec fenêtre dynamique) :} La fenêtre croît après chaque ACK (Slow Start, Additive Increase). En timeout, elle réinitialise à 1 (Multiplicative Decrease). Découvre automatiquement la capacité réseau.
+
+\subsubsection{Diagrammes de séquence des modes (résumés)}
+
+\paragraph{Mode 2 : Stop-and-Wait (sans timeout)} 
 \begin{verbatim}
-if self._mode == ReliabilityMode.PIPELINING_DYNAMIC_WINDOW:
-    self._window_size += 1  # Augmente à chaque ACK
-    
-# En cas de timeout :
-if self._mode == ReliabilityMode.PIPELINING_DYNAMIC_WINDOW:
-    self._window_size = 1   # Retour à 1 (congestion)
+Host A          Network          Host B
+  |               |               |
+  |--DATA SN=1--->|--DATA SN=1--->|
+  | (attente)     | (attente)     | Envoie ACK 1
+  |<--ACK SN=1----|<--ACK SN=1----|
+  |               |               |
+  |--DATA SN=2--->|--DATA SN=2--->|
+  |     X ACK 2 PERDU             |
+  | (BLOQUÉ indéfiniment)         |
 \end{verbatim}
 
-\paragraph{Gestion des ACKs cumulatifs :} Lors de la réception d'un ACK, la méthode receive() supprime du frigo tous les paquets ayant un numéro de séquence inférieur ou égal (comportement cumulatif) :
+\paragraph{Mode 3 : Avec timeout et retransmission}
 \begin{verbatim}
-# Supprimer le paquet et tous les précédents (cumulatif)
-self._unacked_packets = [p for p in self._unacked_packets 
-                         if p.serial_number > pkt.serial_number]
+Host A          Network          Host B
+  |--DATA SN=6--->|--DATA SN=6--->|
+  |[Timer=0.5s]   |    X PERDU     |
+  | @0.5s TIMEOUT |                |
+  |--DATA SN=6--->|--DATA SN=6--->|
+  |<--ACK SN=6----|<--ACK SN=6----|
+  |               |                |
 \end{verbatim}
-Cela permet d'acquitter implicitement plusieurs paquets en un seul ACK.
 
-\paragraph{Synchronisation du buffer et de la fenêtre :} À la réception d'un ACK, une boucle extrait du buffer les paquets en attente, tant que l'espace dans la fenêtre est disponible :
+\paragraph{Mode 4 : Pipelining fenêtre=4}
 \begin{verbatim}
-while self._buffer and len(self._unacked_packets) < self._window_size:
-    next_pkt = self._buffer.pop(0)
-    self._transmit_packet(next_pkt)  # Reprendre transmission
+Host A          Network          Host B
+  |--DATA 1,2,3,4-->|            |
+  |[Fenêtre pleine] |--1,2,3,4-->|
+  |<--ACK 1---------|<--ACK 1-----|
+  |--DATA 5-------->|            |
+  |[ACK cumulatif]  | X ACK 3     |
+  |<--ACK 4---------|<--ACK 4-----|
+  |[Acquitte aussi 3]|            |
 \end{verbatim}
-Cela maintient un flot continu de transmissions sans surcharger le frigo.
+
+\paragraph{Mode 5 : Pipelining dynamique (Slow Start)}
+\begin{verbatim}
+Host A          Network          Host B
+Fenêtre=1
+  |--DATA 1-------->|--DATA 1--->|
+  |<--ACK 1---------|<--ACK 1-----|
+  | Fenêtre: 1->2   |             |
+  |--DATA 2,3------>|--2,3------->|
+  |<--ACK 2---------|<--ACK 2-----|
+  | Fenêtre: 2->3   |             |
+  | ... Croissance progressive    |
+  | jusqu'à saturation (500kbps)  |
+\end{verbatim}
 
 \subsection{Difficultés rencontrées}
 \begin{itemize}
@@ -187,24 +203,67 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
 
 \section{Simulations}
 \subsection{Analyse des résultats et réponses aux questions de l'énoncé}
-\subsubsection{Stop and Wait (Modes 2 \& 3)}
+
+\subsubsection{Mode 2 : Stop-and-Wait avec ACKs}
+\textit{Logs : logs\_mode2.md}
+
+\paragraph{Observations :}
 \begin{itemize}
-    \item Mode 2 (ACK) : Sans timer, nous observons que la simulation se bloque indéfiniment en cas de perte (Lien L1 avec lost\_prob \> 0). Cela illustre les limites du protocole rdt 2.2 décrit aux pages 34-40 du cours.
-    \item Mode 3 (Retransmission) : Le log montre @0.500000 Timer expired! Retransmitting. L'émetteur détecte la perte et survit à l'incident.
-    \item Temps moyen de transmission : [Insérez votre calcul ici : Moyenne des temps entre sends et received ACK].
+    \item \textbf{Séquence stricte} : Un seul paquet par fenêtre (taille=1).
+    \item \textbf{Frigo contrôlé} : Status toujours vide après ACK reçu.
+    \item \textbf{Blocage en cas de perte} : À $t=0.000911$, l'ACK est perdu, la simulation se bloque (pas de timeout, protocole rdt 2.2).
 \end{itemize}
-\subsubsection{Pipelining avec fenêtre fixe (Mode 4)}
+
+\paragraph{Débit :} $\sim 282$ kbps (sans perte) | Bloqué (avec perte)
+
+\subsubsection{Mode 3 : Stop-and-Wait avec Retransmission}
+\textit{Logs : logs\_mode3.md}
+
+\paragraph{Observations :}
 \begin{itemize}
-    \item Observations : Contrairement au mode 3, l'émetteur envoie plusieurs paquets (fenêtre de 4) dès t=0.000000 sans attendre les premiers ACKs.
-    \item Comparaison : Le temps moyen de transmission diminue drastiquement car le lien ne reste pas inactif durant le temps de propagation (RTT).
+    \item \textbf{Timeout et retransmission} : À $t=0.001691$, l'ACK SN=6 est perdu. À $t=0.500000$, le timeout déclenche la retransmission qui réussit à $t=0.500568$ (rdt 3.0, pages 45-52).
+    \item \textbf{Coût du timeout} : Délai massif de 0.5s entre la perte et la récupération.
 \end{itemize}
-\subsubsection{Pipelining avec fenêtre dynamique (Mode 5)}
+
+\paragraph{Débit :} $\sim 157$ kbps (pénalisé par le timeout)
+
+\subsubsection{Mode 4 : Pipelining avec fenêtre fixe}
+\textit{Logs : logs\_mode4.md}
+
+\paragraph{Observations :}
 \begin{itemize}
-    \item Comportement attendu : La fenêtre commence à 1, augmente à chaque ACK, et chute à 1 en cas de timeout.
-    \item Analyse du Goulot : Avec un lien L2 à 500 kbps et une file au routeur de 10, nous observons une congestion.
-    \item Débit moyen effectif : il faudra Insérer le calcul : (Paquets * Taille * 8) / Temps total.
-    \item Justification : L'ajustement dynamique permet de trouver le débit maximal du lien critique (500 kbps) sans saturer indéfiniment le routeur.
+    \item \textbf{Envoi initial} : 4 paquets envoyés à $t=0.000000$ sans attendre d'ACK.
+    \item \textbf{Glissement fenêtre} : À chaque ACK, une nouvelle place se libère pour un nouveau paquet.
+    \item \textbf{ACKs cumulatifs} : À $t=0.001071$, l'ACK SN=6 est perdu, mais $t=0.001244$ l'ACK SN=7 acquitte aussi SN=6 implicitement (pas de timeout).
 \end{itemize}
+
+\paragraph{Débit :} $\sim 380$ kbps (2.4x plus rapide que Mode 3)
+
+\subsubsection{Mode 5 : Pipelining avec fenêtre dynamique}
+\textit{Logs : logs\_mode5.md}
+
+\paragraph{Observations :}
+\begin{itemize}
+    \item \textbf{Slow Start} : Fenêtre croît : 1 → 2 → 3 → 4 → 5 → 6 → 7 après chaque ACK.
+    \item \textbf{Découverte automatique} : Contrairement au Mode 4 (fenêtre fixe), trouve le débit optimal (500 kbps) en augmentant progressivement jusqu'à saturation.
+    \item \textbf{Résilience} : En timeout, fenêtre réinitialise à 1 (Multiplicative Decrease, pages 143-157).
+\end{itemize}
+
+\paragraph{Débit :} $\sim 450$ kbps (meilleur compromis: adaptation + fiabilité)
+
+\paragraph{Synthèse comparative :}
+\begin{center}
+\begin{tabular}{|l|c|c|}
+\hline
+\textbf{Mode} & \textbf{Débit} & \textbf{Avantage} \\
+\hline
+Mode 2 & 282 kbps & Ordre de réception \\
+Mode 3 & 157 kbps & Fiabilité (rdt 3.0) \\
+Mode 4 & 380 kbps & Pipelining simple \\
+Mode 5 & 450 kbps & Adaptation dynamique \\
+\hline
+\end{tabular}
+\end{center}
 \section{Conclusion}
 
 \subsection{Synthèse des résultats}
@@ -212,45 +271,20 @@ La comparaison entre les modes fixe (Mode 4) et dynamique (Mode 5) démontre que
 
 \subsection{Perspectives d'évolution}
 
-\subsubsection{Amélioration du Mode 5 avec l'algorithme VEGAS}
-Le protocole TCP VEGAS introduit une détection de congestion proactive basée sur la mesure du \textit{Round-Trip Time} (RTT) plutôt que sur les pertes de paquets. Cet algorithme serait particulièrement bénéfique dans les scénarios à forte probabilité de perte (chaos) :
-
+\subsubsection{Mode 5 amélioré : VEGAS}
+TCP VEGAS propose une détection proactive de congestion basée sur le RTT (Round-Trip Time) plutôt que sur les pertes. Cela permettrait :
 \begin{itemize}
-    \item \textbf{Détection précoce :} VEGAS mesure l'écart entre le RTT attendu (minimum observé) et le RTT actuel. Une augmentation du RTT signale une congestion avant même qu'il y ait des pertes. Cela permettrait au Mode 5 de réduire la fenêtre de manière préventive.
-    
-    \item \textbf{Réduction du nombre de retransmissions :} En évitant les timeouts coûteux, VEGAS réduit les pics de congestion causés par les retransmissions, ce qui diminue le risque de pertes en cascade.
-    
-    \item \textbf{Mécanisme proposé :}
-\begin{verbatim}
-expected_throughput = window_size / min_rtt
-actual_throughput = packets_acked / current_rtt
-diff = expected_throughput - actual_throughput
-
-if diff > threshold_high:
-    window_size -= 1  # Congestion détectée
-elif diff < threshold_low:
-    window_size += 1  # Réseau disponible
-\end{verbatim}
+    \item Réduire les timeouts en détectant l'augmentation du RTT avant la perte.
+    \item Adapter dynamiquement le timeout au RTT mesuré au lieu de 0.5s fixe.
+    \item Découvrir la capacité réseau plus rapidement en phase Slow Start.
 \end{itemize}
 
-\subsubsection{Gestion améliorée dans les réseaux chaotiques}
-Pour les scénarios avec probabilités élevées de perte (chaos), plusieurs améliorations sont envisageables :
-
+\subsubsection{Extensions possibles}
 \begin{itemize}
-    \item \textbf{Adaptation du timeout :} Au lieu d'un timeout fixe (0.5s), implémenter un timeout adaptatif basé sur le RTT mesurer. Cela réduit les faux timeouts et les retransmissions inutiles.
-    
-    \item \textbf{Mode Slow-Start amélioré :} Après un timeout, débuter une phase de Slow-Start (doubler la fenêtre chaque RTT) jusqu'à une limite prédéfinie, permettant une reprise plus rapide après une congestion.
-    
-    \item \textbf{Redondance sélective :} Envoyer certains paquets critiques plusieurs fois avec de petits délais, réduisant la probabilité qu'un paquet soit perdu au moins une fois.
-\end{itemize}
-
-\subsubsection{Extension à d'autres protocoles}
-\begin{itemize}
-    \item \textbf{Mode 6 : Pipelining avec VEGAS :} Implémenter un Mode 6 combinant le Pipelining dynamique avec la détection RTT de VEGAS. Cela offrirait une meilleure performance dans les réseaux variables.
-    
-    \item \textbf{Mode 7 : Contrôle de congestion Multi-flux :} Pour les topologies multi-source, implémenter une négociation de bande passante équitable inspirée de TCP Reno ou CUBIC.
+    \item \textbf{Mode 6} : Pipelining + détection VEGAS pour réseaux variables.
+    \item \textbf{Mode 7} : Contrôle équitable multi-flux (TCP Reno/CUBIC).
 \end{itemize}
 
 \subsection{Conclusion générale}
-Ce projet a démontré l'importance de l'adaptation dynamique dans les protocoles de transport. Alors que le Mode 4 (fenêtre fixe) offre la simplicité, le Mode 5 (fenêtre dynamique) prouve son efficacité face à la variabilité réseau. L'intégration de concepts avancés comme VEGAS promettrait une résilience accrue dans les environnements chaotiques, où les pertes de paquets et la congestion sont fréquentes. L'évolution vers des algorithmes proactifs plutôt que réactifs représente la voie naturelle pour l'optimisation continue des protocoles de transmission fiable.
+Ce projet démontre l'importance de l'adaptation dynamique. Le Mode 5 (fenêtre dynamique) surpasse le Mode 4 (fenêtre fixe) en s'ajustant automatiquement aux capacités réseau. L'intégration d'algorithmes proactifs comme VEGAS (détection RTT) améliorerait encore la résilience dans les environnements chaotiques. L'évolution vers le contrôle de congestion TCP représente la voie naturelle pour optimiser les protocoles de transmission fiable.
 \end{document}
