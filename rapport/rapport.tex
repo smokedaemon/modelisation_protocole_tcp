@@ -1,0 +1,77 @@
+\documentclass[12pt]{article}
+\input{preambule.tex}
+
+\begin{document}
+
+\title{Rapport de Simulation}
+
+\author{
+    Glineur Pierre \\
+    Matricule1 \and
+    Tiako Ngouadje Cardin Patson \\
+    Matricule2
+    }
+\date{\today}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Exécution}
+Cette section détaille la structure du projet et la marche à suivre pour reproduire nos résultats.
+
+\subsection{Structure du projet}
+Le projet est organisé autour d'un moteur de simulation discret (Simulator.py) et d'entités réseau (Host.py, Router.py, NIC.py, Link.py).
+
+\subsection{Instructions de reproduction}
+Pour reproduire les scénarios décrits dans ce rapport, exécutez les scripts suivants à la racine du projet :
+\begin{itemize}
+    \item Mode 1 : python mode1NO\_RELIABILITY.py
+    \item Mode 2 : python mode2acquittements.py
+    \item Mode 3 : python mode3avecretransmission.py
+    \item Mode 4 : python mode4pipelining.py
+    \item Mode 5 : python mode5pipeliningavecfenetredynamique.py
+    \item Analyse Globale : python run\_all\_scenarios.py (Script maître avec paramètres de perte éditables).
+\end{itemize}
+
+\section{Implémentation}
+\subsection{Approche choisie}
+Notre implémentation repose sur l'extension de la classe Host pour gérer les mécanismes de fiabilité décrits dans le chapitre 3 du cours (Transport Layer). Nous avons mis en place :
+\begin{itemize}
+    \item Le Frigo (\_unacked\_packets) : Gestion de la fenêtre glissante.
+    \item Le Buffer (\_buffer) : File d'attente logicielle pour le stockage des paquets en attente de fenêtre libre.
+    \item Le Timer unique : Implémentation du protocole rdt 3.0 avec un décompte pour le paquet le plus ancien.
+\end{itemize}
+
+\subsection{Difficultés rencontrées}
+\begin{itemize}
+    \item Gestion des ACKs cumulatifs : S'assurer que la réception d'un ACK libère correctement tous les paquets précédents du "frigo".
+    \item Synchronisation du Timer : Éviter les redondances de timers lors de l'envoi rapide de plusieurs paquets en mode Pipelining.
+\end{itemize}
+
+\subsection{État final}
+L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent en Stop-and-Wait, tandis que les modes 4 et 5 exploitent le Pipelining pour optimiser l'utilisation de la bande passante.
+
+\section{Simulations}
+\subsection{Analyse des résultats et réponses aux questions de l'énoncé}
+\subsubsection{Stop and Wait (Modes 2 \& 3)}
+\begin{itemize}
+    \item Mode 2 (ACK) : Sans timer, nous observons que la simulation se bloque indéfiniment en cas de perte (Lien L1 avec lost\_prob \> 0). Cela illustre les limites du protocole rdt 2.2 décrit aux pages 34-40 du cours.
+    \item Mode 3 (Retransmission) : Le log montre @0.500000 Timer expired! Retransmitting. L'émetteur détecte la perte et survit à l'incident.
+    \item Temps moyen de transmission : [Insérez votre calcul ici : Moyenne des temps entre sends et received ACK].
+\end{itemize}
+\subsubsection{Pipelining avec fenêtre fixe (Mode 4)}
+\begin{itemize}
+    \item Observations : Contrairement au mode 3, l'émetteur envoie plusieurs paquets (fenêtre de 4) dès t=0.000000 sans attendre les premiers ACKs.
+    \item Comparaison : Le temps moyen de transmission diminue drastiquement car le lien ne reste pas inactif durant le temps de propagation (RTT).
+\end{itemize}
+\subsubsection{Pipelining avec fenêtre dynamique (Mode 5)}
+\begin{itemize}
+    \item Comportement attendu : La fenêtre commence à 1, augmente à chaque ACK, et chute à 1 en cas de timeout.
+    \item Analyse du Goulot : Avec un lien L2 à 500 kbps et une file au routeur de 10, nous observons une congestion.
+    \item Débit moyen effectif : il faudra Insérer le calcul : (Paquets * Taille * 8) / Temps total.
+    \item Justification : L'ajustement dynamique permet de trouver le débit maximal du lien critique (500 kbps) sans saturer indéfiniment le routeur.
+\end{itemize}
+\section{Conclusion}
+La comparaison entre les modes fixe et dynamique montre que le mode dynamique (inspiré de TCP) est plus résilient et efficace pour s'adapter aux capacités variables des nœuds intermédiaires (routeurs).
+\end{document}
