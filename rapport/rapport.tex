@@ -206,5 +206,51 @@ L'implémentation supporte les 5 modes demandés. Les modes 2 et 3 fonctionnent 
     \item Justification : L'ajustement dynamique permet de trouver le débit maximal du lien critique (500 kbps) sans saturer indéfiniment le routeur.
 \end{itemize}
 \section{Conclusion}
-La comparaison entre les modes fixe et dynamique montre que le mode dynamique (inspiré de TCP) est plus résilient et efficace pour s'adapter aux capacités variables des nœuds intermédiaires (routeurs).
+
+\subsection{Synthèse des résultats}
+La comparaison entre les modes fixe (Mode 4) et dynamique (Mode 5) démontre que l'approche dynamique est plus résiliente et efficace pour s'adapter aux variations des capacités réseau. Le Mode 5, inspiré du contrôle de congestion TCP, ajuste la taille de la fenêtre en réaction aux ACKs reçus et aux timeouts, permettant une meilleure utilisation de la bande passante tout en évitant la saturation des files d'attente intermédiaires.
+
+\subsection{Perspectives d'évolution}
+
+\subsubsection{Amélioration du Mode 5 avec l'algorithme VEGAS}
+Le protocole TCP VEGAS introduit une détection de congestion proactive basée sur la mesure du \textit{Round-Trip Time} (RTT) plutôt que sur les pertes de paquets. Cet algorithme serait particulièrement bénéfique dans les scénarios à forte probabilité de perte (chaos) :
+
+\begin{itemize}
+    \item \textbf{Détection précoce :} VEGAS mesure l'écart entre le RTT attendu (minimum observé) et le RTT actuel. Une augmentation du RTT signale une congestion avant même qu'il y ait des pertes. Cela permettrait au Mode 5 de réduire la fenêtre de manière préventive.
+    
+    \item \textbf{Réduction du nombre de retransmissions :} En évitant les timeouts coûteux, VEGAS réduit les pics de congestion causés par les retransmissions, ce qui diminue le risque de pertes en cascade.
+    
+    \item \textbf{Mécanisme proposé :}
+\begin{verbatim}
+expected_throughput = window_size / min_rtt
+actual_throughput = packets_acked / current_rtt
+diff = expected_throughput - actual_throughput
+
+if diff > threshold_high:
+    window_size -= 1  # Congestion détectée
+elif diff < threshold_low:
+    window_size += 1  # Réseau disponible
+\end{verbatim}
+\end{itemize}
+
+\subsubsection{Gestion améliorée dans les réseaux chaotiques}
+Pour les scénarios avec probabilités élevées de perte (chaos), plusieurs améliorations sont envisageables :
+
+\begin{itemize}
+    \item \textbf{Adaptation du timeout :} Au lieu d'un timeout fixe (0.5s), implémenter un timeout adaptatif basé sur le RTT mesurer. Cela réduit les faux timeouts et les retransmissions inutiles.
+    
+    \item \textbf{Mode Slow-Start amélioré :} Après un timeout, débuter une phase de Slow-Start (doubler la fenêtre chaque RTT) jusqu'à une limite prédéfinie, permettant une reprise plus rapide après une congestion.
+    
+    \item \textbf{Redondance sélective :} Envoyer certains paquets critiques plusieurs fois avec de petits délais, réduisant la probabilité qu'un paquet soit perdu au moins une fois.
+\end{itemize}
+
+\subsubsection{Extension à d'autres protocoles}
+\begin{itemize}
+    \item \textbf{Mode 6 : Pipelining avec VEGAS :} Implémenter un Mode 6 combinant le Pipelining dynamique avec la détection RTT de VEGAS. Cela offrirait une meilleure performance dans les réseaux variables.
+    
+    \item \textbf{Mode 7 : Contrôle de congestion Multi-flux :} Pour les topologies multi-source, implémenter une négociation de bande passante équitable inspirée de TCP Reno ou CUBIC.
+\end{itemize}
+
+\subsection{Conclusion générale}
+Ce projet a démontré l'importance de l'adaptation dynamique dans les protocoles de transport. Alors que le Mode 4 (fenêtre fixe) offre la simplicité, le Mode 5 (fenêtre dynamique) prouve son efficacité face à la variabilité réseau. L'intégration de concepts avancés comme VEGAS promettrait une résilience accrue dans les environnements chaotiques, où les pertes de paquets et la congestion sont fréquentes. L'évolution vers des algorithmes proactifs plutôt que réactifs représente la voie naturelle pour l'optimisation continue des protocoles de transmission fiable.
 \end{document}
