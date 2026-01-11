@@ -21,18 +21,80 @@
 Cette section détaille la structure du projet et la marche à suivre pour reproduire nos résultats.
 
 \subsection{Structure du projet}
-Le projet est organisé autour d'un moteur de simulation discret (Simulator.py) et d'entités réseau (Host.py, Router.py, NIC.py, Link.py).
+Le projet est organisé selon l'architecture suivante :
+
+\subsubsection{Composants réseau (racine du projet)}
+\begin{itemize}
+    \item \textbf{Host.py} : Classe représentant les nœuds hôtes (émetteurs et récepteurs) avec implémentation des protocoles de fiabilité (modes 2 à 5).
+    \item \textbf{Router.py} : Classe pour les routeurs, gérant l'acheminement et la file d'attente des paquets.
+    \item \textbf{NIC.py} : Interface réseau (Network Interface Card) pour chaque hôte.
+    \item \textbf{Link.py} : Classe représentant les liaisons réseau avec paramètres de délai, bande passante et probabilité de perte.
+    \item \textbf{Packet.py} : Structure des paquets échangés.
+\end{itemize}
+
+\subsubsection{Moteur de simulation (dossier \texttt{simulator/})}
+Le moteur de simulation discret est composé de :
+\begin{itemize}
+    \item \textbf{Simulator.py} : Cœur du moteur gérant la file d'événements et l'horloge globale.
+    \item \textbf{SimulatedEntity.py} : Classe de base pour toutes les entités du réseau.
+    \item \textbf{Event.py} et \textbf{SimulatorEvent.py} : Gestion des événements de simulation.
+\end{itemize}
+
+\subsubsection{Scripts de test et analyse (racine du projet)}
+\begin{itemize}
+    \item \textbf{mode2acquittements.py} : Simulation du Mode 2 (Stop-and-Wait avec accusés de réception).
+    \item \textbf{mode3avecretransmission.py} : Simulation du Mode 3 (Stop-and-Wait avec timer et retransmission).
+    \item \textbf{mode4pipelining.py} : Simulation du Mode 4 (Pipelining avec fenêtre fixe).
+    \item \textbf{mode5\_dynamique\_50.py} : Simulation du Mode 5 (Pipelining avec fenêtre dynamique, adaptée aux variations de réseau).
+    \item \textbf{run\_simulation\_mod\_packet\_exchange.py} : Script pour analyser différents scénarios et générer des logs détaillés.
+    \item \textbf{example.py} : Exemple de configuration simple pour démarrer avec le simulateur.
+\end{itemize}
 
 \subsection{Instructions de reproduction}
-Pour reproduire les scénarios décrits dans ce rapport, exécutez les scripts suivants à la racine du projet :
+Pour reproduire les scénarios décrits dans ce rapport, exécutez les scripts suivants à la racine du projet en utilisant la commande :
+\begin{verbatim}
+python <nom_du_script>.py
+\end{verbatim}
+
+\subsubsection{Scénarios de test}
+Les cinq modes de transmission sont testables indépendamment :
+
 \begin{itemize}
-    \item Mode 1 : python mode1NO\_RELIABILITY.py
-    \item Mode 2 : python mode2acquittements.py
-    \item Mode 3 : python mode3avecretransmission.py
-    \item Mode 4 : python mode4pipelining.py
-    \item Mode 5 : python mode5pipeliningavecfenetredynamique.py
-    \item Analyse Globale : python run\_all\_scenarios.py (Script maître avec paramètres de perte éditables).
+    \item \textbf{Mode 2} : \verb|python mode2acquittements.py|
+    \begin{itemize}
+        \item Implémente le protocole Stop-and-Wait avec accusés de réception (ACK).
+        \item Pas de mécanisme de timeout ; la simulation bloque en cas de perte.
+        \item Utile pour démontrer les limitations du protocole rdt 2.2.
+    \end{itemize}
+    
+    \item \textbf{Mode 3} : \verb|python mode3avecretransmission.py|
+    \begin{itemize}
+        \item Étend le Mode 2 avec un timer et retransmission automatique.
+        \item Démontre le protocole rdt 3.0 avec gestion des timeouts.
+        \item Robustesse accrue face aux pertes de paquets.
+    \end{itemize}
+    
+    \item \textbf{Mode 4} : \verb|python mode4pipelining.py|
+    \begin{itemize}
+        \item Implémente le Pipelining avec fenêtre de transmission fixe.
+        \item Améliore le débit en envoyant plusieurs paquets sans attendre les ACKs.
+        \item Fenêtre pré-configurée pour éviter la saturation du réseau.
+    \end{itemize}
+    
+    \item \textbf{Mode 5} : \verb|python mode5_dynamique_50.py|
+    \begin{itemize}
+        \item Pipelining avec fenêtre dynamique (inspiré de TCP Congestion Control).
+        \item La fenêtre s'adapte automatiquement en fonction des ACKs reçus et des timeouts.
+        \item Optimisation du débit tout en évitant la congestion du réseau.
+    \end{itemize}
 \end{itemize}
+
+\subsubsection{Script d'analyse globale}
+Pour une analyse complète comparant plusieurs scénarios :
+\begin{verbatim}
+python run_simulation_mod_packet_exchange.py
+\end{verbatim}
+Ce script génère des logs détaillés permettant d'analyser les performances de chaque mode et de comparer les résultats.
 
 \section{Implémentation}
 \subsection{Approche choisie}
@@ -42,6 +104,77 @@ Notre implémentation repose sur l'extension de la classe Host pour gérer les m
     \item Le Buffer (\_buffer) : File d'attente logicielle pour le stockage des paquets en attente de fenêtre libre.
     \item Le Timer unique : Implémentation du protocole rdt 3.0 avec un décompte pour le paquet le plus ancien.
 \end{itemize}
+
+\subsubsection{Détails d'implémentation par mode}
+
+\paragraph{Gestion générale de la fenêtre et du buffer :}
+L'initialisation de la classe Host crée les structures de données essentielles :
+\begin{verbatim}
+self._unacked_packets = []    # Le "Frigo"
+self._buffer = []              # File d'attente
+self._window_size = 1          # Taille fenêtre
+self._timer_pending = False
+self._timeout_duration = 0.5   # Délai timeout
+\end{verbatim}
+La méthode send() décide d'envoyer immédiatement ou de placer en buffer selon l'état de la fenêtre :
+\begin{verbatim}
+if len(self._unacked_packets) < self._window_size:
+    self._transmit_packet(pkt)  # Envoyer
+else:
+    self._buffer.append(pkt)    # Buffer plein, attendre
+\end{verbatim}
+
+\paragraph{Modes 2 \& 3 (Stop-and-Wait) :} Les deux modes utilisent une fenêtre fixe de taille 1. L'émetteur envoie un paquet et doit attendre l'ACK avant de poursuivre. La différence fondamentale réside dans le timer :
+
+\subparagraph{Mode 2 (ACK simple) :} Pas de timer, le code retourne sans action :
+\begin{verbatim}
+def _start_timer(self):
+    if self._mode == ReliabilityMode.ACKNOWLEDGES:
+        return  # En mode 2, pas de timer
+    # ... suite du code
+\end{verbatim}
+Si un paquet est perdu, la simulation attend indéfiniment l'ACK.
+
+\subparagraph{Mode 3 (Retransmission) :} Le timer est armé lors de chaque envoi. À l'expiration, la méthode \_on\_timeout() retransmet :
+\begin{verbatim}
+def _on_timeout(self):
+    if self._unacked_packets:
+        oldest_pkt = self._unacked_packets[0]
+        self.info(f'Timer expired!')
+        self._nic.send(oldest_pkt)  # Retransmettre
+        self._timer_pending = False
+        self._start_timer()  # Réarmer le timer
+\end{verbatim}
+
+\paragraph{Modes 4 \& 5 (Pipelining) :} L'émetteur envoie plusieurs paquets dans une fenêtre de transmission avant d'attendre les ACKs.
+
+\subparagraph{Mode 4 (Fenêtre fixe) :} La fenêtre a une taille pré-définie et constante (ex. 4 paquets). Si la fenêtre est pleine, les nouveaux paquets sont stockés dans le buffer.
+
+\subparagraph{Mode 5 (Fenêtre dynamique) :} La fenêtre débute à 1 et augmente d'un paquet à chaque ACK reçu, mimant le comportement TCP. En cas de timeout, elle réinitialise à 1 :
+\begin{verbatim}
+if self._mode == ReliabilityMode.PIPELINING_DYNAMIC_WINDOW:
+    self._window_size += 1  # Augmente à chaque ACK
+    
+# En cas de timeout :
+if self._mode == ReliabilityMode.PIPELINING_DYNAMIC_WINDOW:
+    self._window_size = 1   # Retour à 1 (congestion)
+\end{verbatim}
+
+\paragraph{Gestion des ACKs cumulatifs :} Lors de la réception d'un ACK, la méthode receive() supprime du frigo tous les paquets ayant un numéro de séquence inférieur ou égal (comportement cumulatif) :
+\begin{verbatim}
+# Supprimer le paquet et tous les précédents (cumulatif)
+self._unacked_packets = [p for p in self._unacked_packets 
+                         if p.serial_number > pkt.serial_number]
+\end{verbatim}
+Cela permet d'acquitter implicitement plusieurs paquets en un seul ACK.
+
+\paragraph{Synchronisation du buffer et de la fenêtre :} À la réception d'un ACK, une boucle extrait du buffer les paquets en attente, tant que l'espace dans la fenêtre est disponible :
+\begin{verbatim}
+while self._buffer and len(self._unacked_packets) < self._window_size:
+    next_pkt = self._buffer.pop(0)
+    self._transmit_packet(next_pkt)  # Reprendre transmission
+\end{verbatim}
+Cela maintient un flot continu de transmissions sans surcharger le frigo.
 
 \subsection{Difficultés rencontrées}
 \begin{itemize}
